@@ -11,7 +11,6 @@ try:
 except Exception:
     UP, RIGHT, DOWN, LEFT, ABSORB = "UP", "RIGHT", "DOWN", "LEFT", "⊥"
 
-
 class MyPolicy(Policy):
     """
     Value-free constructive policy based on shortest-path over the MDP's
@@ -39,107 +38,85 @@ class MyPolicy(Policy):
         tie_break: Tuple[Action, ...] = (RIGHT, DOWN, LEFT, UP),
     ):
         super().__init__(mdp, rng)
-        self._tie_break: Tuple[Action, ...] = tie_break
-        self._states: List[State] = []
-        self._index: Dict[State, int] = {}
-        self._preds: Dict[State, List[Tuple[State, Action]]] = {}
-        self._dist: Dict[State, float] = {}
-        self._choice: Dict[State, Action] = {}
-        self._build()
+        self._tb: Tuple[Action, ...] = tie_break
+        self._S: List[State] = []
+        self._idx: Dict[State, int] = {}
+        self._rev: Dict[State, List[Tuple[State, Action]]] = {}
+        self._D: Dict[State, float] = {}
+        self._act: Dict[State, Action] = {}
+        self._prepare()
 
-    # -- Policy API ----------------------------------------------------------
     def _decision(self, s: State) -> Action:
-        # Si es terminal o absorbente, devuelve ABSORB
-        acts = list(self.mdp.actions(s))
-        if acts == [ABSORB]:
+        aa = list(self.mdp.actions(s))
+        if aa == [ABSORB]:
             return ABSORB
-        # Acción precomputada; fallback: tie-break inicial
-        a = self._choice.get(s)
-        return a if a is not None else self._tie_break[0]
+        z = self._act.get(s)
+        return z if z is not None else self._tb[0]
 
-    # -- Internals -----------------------------------------------------------
-    def _most_likely_successor(self, s: State, a: Action) -> Optional[State]:
-        """Devuelve el sucesor más probable de (s,a)."""
+    def _ml_succ(self, s: State, a: Action) -> Optional[State]:
         dist = self.mdp.transition(s, a)
         if not dist:
             return None
-        # Elegir argmax por probabilidad; desempate estable por orden de aparición
-        best_ns, best_p = dist[0]
-        for ns, p in dist[1:]:
-            if p > best_p:
-                best_ns, best_p = ns, p
-        return best_ns
+        j, pj = dist[0]
+        for t, pt in dist[1:]:
+            if pt > pj:
+                j, pj = t, pt
+        return j
 
-    def _build(self) -> None:
-        # 1) Estados alcanzables
-        self._states = enumerate_states(self.mdp)
-        self._index = {s: i for i, s in enumerate(self._states)}
+    def _prepare(self) -> None:
+        self._S = enumerate_states(self.mdp)
+        self._idx = {s: i for i, s in enumerate(self._S)}
+        self._rev = {s: [] for s in self._S}
 
-        # 2) Grafo por sucesor más probable: construimos predecesores
-        self._preds = {s: [] for s in self._states}
-        for s in self._states:
-            acts = list(self.mdp.actions(s))
-            if acts == [ABSORB]:
-                continue  # no salientes desde terminal/absorbente
+        for s in self._S:
+            aa = list(self.mdp.actions(s))
+            if aa == [ABSORB]:
+                continue
             for a in (UP, RIGHT, DOWN, LEFT):
-                if a not in acts:
+                if a not in aa:
                     continue
-                ns = self._most_likely_successor(s, a)
-                if ns is None:
-                    continue
-                # Guardamos (predecesor, acción) para el reverso
-                self._preds.setdefault(ns, []).append((s, a))
+                ns = self._ml_succ(s, a)
+                if ns is not None:
+                    self._rev.setdefault(ns, []).append((s, a))
 
-        # 3) Distancias por BFS inverso desde objetivos
         from collections import deque
 
         INF = float("inf")
-        self._dist = {s: INF for s in self._states}
-
-        # Seeds: todos los estados con símbolo 'G' y el absorbente (ABSORB, ABSORB)
+        self._D = {s: INF for s in self._S}
         seeds: List[State] = []
-        for s in self._states:
+        for s in self._S:
             try:
-                if s[0] == ABSORB or s[1] == ABSORB:
-                    seeds.append(s)
-                elif s[1] == "G":
+                if s[0] == ABSORB or s[1] == ABSORB or s[1] == "G":
                     seeds.append(s)
             except Exception:
-                # Estados no conformes al LakeMDP; ignorar
                 pass
 
-        q = deque()
+        q = deque(seeds)
         for t in seeds:
-            self._dist[t] = 0.0
-            q.append(t)
+            self._D[t] = 0.0
 
         while q:
             x = q.popleft()
-            dx = self._dist[x]
-            for (pred, _) in self._preds.get(x, []):
-                if self._dist[pred] > dx + 1.0:
-                    self._dist[pred] = dx + 1.0
-                    q.append(pred)
+            dx = self._D[x]
+            for (p, _a) in self._rev.get(x, []):
+                nd = dx + 1.0
+                if self._D[p] > nd:
+                    self._D[p] = nd
+                    q.append(p)
 
-        # 4) Elegimos acción que minimiza distancia del sucesor
-        for s in self._states:
-            acts = list(self.mdp.actions(s))
-            if acts == [ABSORB]:
+        for s in self._S:
+            aa = list(self.mdp.actions(s))
+            if aa == [ABSORB]:
                 continue
-            best_a = None
-            best_d = float("inf")
-            # desempate por orden fijo de acciones
-            for a in self._tie_break:
-                if a not in acts:
+            best = None
+            bd = float("inf")
+            for a in self._tb:
+                if a not in aa:
                     continue
-                ns = self._most_likely_successor(s, a)
+                ns = self._ml_succ(s, a)
                 if ns is None:
                     continue
-                d = self._dist.get(ns, float("inf"))
-                if d < best_d:
-                    best_d = d
-                    best_a = a
-            # Si todo es inf (ej. rodeado por hoyos), usar desempate fijo
-            if best_a is None:
-                best_a = self._tie_break[0]
-            self._choice[s] = best_a
+                d = self._D.get(ns, float("inf"))
+                if d < bd:
+                    bd, best = d, a
+            self._act[s] = best if best is not None else self._tb[0]

@@ -31,17 +31,16 @@ def iterative_policy_evaluation(
     S = P.shape[0]
     v = np.zeros(S, dtype=float)
 
-    # Umbral según criterio de parada en las diapositivas
-    if gamma == 1.0:
-        thresh = eps  # caso episodios con γ=1, no aplica la cota teórica
-    else:
-        thresh = eps * (1.0 - gamma) / gamma
-
-    for _ in range(max_iters):
-        v_new = bellman_update(v, P, r, gamma)
-        delta = np.max(np.abs(v_new - v))
-        v = v_new
-        if delta < thresh:
+    n = P.shape[0]
+    w = np.zeros(n, dtype=float)
+    thr = eps if gamma == 1.0 else eps * (1.0 - gamma) / gamma
+    k = 0
+    while k < max_iters:
+        nxt = bellman_update(w, P, r, gamma)
+        if np.max(np.abs(nxt - w)) < thr:
+            w = nxt
             break
+        w = nxt
+        k += 1
 
-    return v
+    return w # Returns  v : (S,) array

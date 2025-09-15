@@ -16,20 +16,20 @@ def enumerate_states(mdp) -> List[object]:
 
     We rely only on the environment's own transitions.
     """
-    start = mdp.start_state()
-    seen = {start}
-    order: List[object] = [start]
-    stack = [start]
-    while stack:
-        s = stack.pop()
+    s0 = mdp.start_state()
+    seen = {s0}
+    out: List[object] = [s0]
+    stk = [s0]
+    while stk:
+        s = stk.pop()
         for a in mdp.actions(s):
-            for ns, p in mdp.transition(s, a):
+            for ns, _p in mdp.transition(s, a):
                 if ns not in seen:
                     seen.add(ns)
-                    order.append(ns)
-                    stack.append(ns)
-    return order
+                    out.append(ns)
+                    stk.append(ns)
 
+    return out
 
 def build_policy_Pr(
     mdp, policy: Policy, states: List[object]
@@ -42,44 +42,36 @@ def build_policy_Pr(
 
     Terminal/absorbing states are detected via actions(s) == [ABSORB] and given a self-loop.
     """
-    S = len(states)
-    index: Dict[object, int] = {s: i for i, s in enumerate(states)}
-    P = np.zeros((S, S), dtype=float)
+    
+    n = len(states)
+    idx: Dict[object, int] = {s: i for i, s in enumerate(states)}
+    P = np.zeros((n, n), dtype=float)
 
     for s in states:
-        i = index[s]
-
+        i = idx[s]
         acts = list(mdp.actions(s))
         if acts == [ABSORB]:
-            absorb_idx = index[(ABSORB, ABSORB)]
-            P[i, absorb_idx] = 1.0
+            P[i, idx[(ABSORB, ABSORB)]] = 1.0
             continue
 
-        # Optional stochastic policies via action_probs(s)
-        probs = None
         ap = getattr(policy, "action_probs", None)
-        if callable(ap):
-            pa = ap(s)
-            if pa is not None:
-                # validate once and reuse
-                probs = {a: float(pa[a]) for a in pa if pa[a] > 0.0}
-
-        if probs is None:
-            a = policy(s)
-            for ns, p in mdp.transition(s, a):
-                P[i, index[ns]] += float(p)
-        else:
+        probs = ap(s) if callable(ap) else None
+        if probs:
             for a, pa in probs.items():
                 if pa <= 0.0:
                     continue
                 for ns, p in mdp.transition(s, a):
-                    P[i, index[ns]] += float(pa) * float(p)
+                    P[i, idx[ns]] += float(pa) * float(p)
+        else:
+            a = policy(s)
+            for ns, p in mdp.transition(s, a):
+                P[i, idx[ns]] += float(p)
 
-        # Defensive normalization (handles tiny drift)
-        row_sum = P[i].sum()
-        if row_sum > 0 and abs(row_sum - 1.0) > 1e-8:
-            P[i] /= row_sum
+        rs = P[i].sum()
+        if rs > 0 and abs(rs - 1.0) > 1e-8:
+            P[i] /= rs
 
-    rewards = np.array([mdp.reward(sj) for sj in states], dtype=float)
-    r = P @ rewards
+    rew = np.array([mdp.reward(t) for t in states], dtype=float)
+    r = P @ rew
+
     return P, r

@@ -38,18 +38,13 @@ def run(
         v    : (S,) state-value vector aligned with the internal state ordering
         f_pi : scalar fitness f^{\hat{π}} = v^{\hat{π}}(s_0)
     """
-    # Fuente de aleatoriedad (si la política la requiere)
     if rng is None:
         rng = np.random.default_rng(0)
 
-    # 1) Construir política determinista libre de valores
     pi = MyPolicy(mdp, rng)
+    S = enumerate_states(mdp)
+    P, r = build_policy_Pr(mdp, pi, S)
 
-    # 2) Enumerar estados y construir P y r inducidos por la política
-    states = enumerate_states(mdp)
-    P, r = build_policy_Pr(mdp, pi, states)
-
-    # 3) Evaluar política: exacta o iterativa
     if method == "exact":
         v = exact_policy_evaluation(P, r, gamma)
     elif method == "iterative":
@@ -57,7 +52,6 @@ def run(
     else:
         raise ValueError("method must be one of {'exact', 'iterative'}")
 
-    # 4) Fitness = valor en el estado inicial (el start es el primer estado enumerado)
-    f_pi = float(v[0])
-
-    return pi, v, f_pi
+    f = float(v[0])
+    
+    return pi, v, f
